@@ -1,0 +1,10 @@
+---
+Language: Cpp
+# Pointer alignment: left means "T* name" instead of "T *name"
+PointerAlignment: Left
+# Other useful settings
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+--- 
