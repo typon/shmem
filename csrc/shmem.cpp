@@ -48,6 +48,11 @@ SMQueue SMQueue::create(const std::string& name, std::size_t max_elements, std::
         throw std::runtime_error("Failed to map shared memory: " + name);
     }
 
+#ifdef __linux__
+    // Hint the kernel to back the mapping with huge pages and pre-populate if possible.
+    madvise(addr, total_size, MADV_HUGEPAGE | MADV_WILLNEED);
+#endif
+
     // Initialize control block
     ControlBlock* cb = static_cast<ControlBlock*>(addr);
     cb->max_elements = max_elements;
@@ -320,6 +325,78 @@ bool SMQueue::try_pop(std::byte* buffer) {
     // Unlock the mutex
     sem_post(m_mutex);
     return true;
+}
+
+// Zero-copy borrow (non-blocking). Returns true if a message was borrowed.
+bool SMQueue::borrow(std::byte const** data_ptr, std::size_t& index_out) {
+    if (m_addr == nullptr) {
+        return false;
+    }
+
+    // Attempt to grab an item – same as try_pop but without copying.
+    if (sem_trywait(m_items) != 0) {
+        return false; // queue empty
+    }
+
+    // Lock the mutex to read metadata safely
+    int result;
+    do {
+        result = sem_wait(m_mutex);
+    } while (result == -1 && errno == EINTR);
+
+    if (result == -1) {
+        // Failed to lock – restore semaphore so we don't lose the item
+        sem_post(m_items);
+        return false;
+    }
+
+    auto* cb = get_control_block();
+
+    index_out = cb->tail;
+    const std::byte* src = get_element(cb->tail);
+
+#ifdef __GNUC__
+    // Prefetch first cache line to hide latency
+    __builtin_prefetch(src, 0, 3);
+#endif
+
+    *data_ptr = src;
+
+    // NOTE: We purposely *do not* advance tail/count here. The slot will be released later via
+    // commit_pop(). This keeps the message reserved so that producers cannot overwrite it while it
+    // is still in use by the consumer.
+
+    // Unlock mutex so producers/other consumers can proceed.
+    sem_post(m_mutex);
+    return true;
+}
+
+// Release a previously borrowed slot and make it reusable.
+void SMQueue::commit_pop(std::size_t index) {
+    if (m_addr == nullptr) {
+        return;
+    }
+
+    auto* cb = get_control_block();
+
+    // Lock mutex
+    int result;
+    do {
+        result = sem_wait(m_mutex);
+    } while (result == -1 && errno == EINTR);
+
+    if (result == -1) {
+        return; // failed to lock, leak the slot – worst-case scenario is transient memory pressure
+    }
+
+    // Sanity-check index belongs to current tail
+    if (index == cb->tail) {
+        cb->tail = (cb->tail + 1) % cb->max_elements;
+        cb->count--; // item fully consumed
+    }
+
+    // Unlock mutex
+    sem_post(m_mutex);
 }
 
 // Close the queue

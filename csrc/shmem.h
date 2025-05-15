@@ -71,6 +71,14 @@ class SMQueue {
     // Try to pop a message (non-blocking)
     bool try_pop(std::byte* buffer);
 
+    // Zero-copy borrow of the next message (non-blocking). Returns true on success. The caller receives
+    // a pointer to the message data living inside the queue and the element index that must later be
+    // released via commit_pop(index).
+    bool borrow(std::byte const** data_ptr, std::size_t& index);
+
+    // Release a previously borrowed element (identified by its index) and make the slot reusable.
+    void commit_pop(std::size_t index);
+
     // Close the queue
     void close();
 

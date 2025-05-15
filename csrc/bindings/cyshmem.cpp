@@ -102,5 +102,52 @@ NB_MODULE(cyshmem, m) {
 
                 return result;
             },
-            "Try to pop a message (non-blocking) as an array");
+            "Try to pop a message (non-blocking) as an array")
+        // Zero-copy borrow (non-blocking). The ndarray returned references the shared memory slot
+        // directly. When the ndarray is garbage-collected, the slot is released back to the queue.
+        .def(
+            "borrow_np",
+            [](shmem::SMQueue& self) -> std::optional<nb::ndarray<nb::numpy, uint8_t>> {
+                const std::byte* data_ptr = nullptr;
+                std::size_t index = 0;
+
+                bool ok = self.borrow(&data_ptr, index);
+                if (!ok) {
+                    return std::nullopt;
+                }
+
+                // Create a small helper object that will release the slot on destruction
+                struct BorrowHandle {
+                    shmem::SMQueue* q;
+                    std::size_t idx;
+                };
+
+                auto* handle = new BorrowHandle{&self, index};
+
+                // Capsule deleter releases the slot and deletes the handle
+                nb::capsule cap(handle, [](void* p) noexcept {
+                    auto* h = static_cast<BorrowHandle*>(p);
+                    if (h && h->q) {
+                        h->q->commit_pop(h->idx);
+                    }
+                    delete h;
+                });
+
+                std::vector<std::size_t> shape = {self.element_size()};
+
+                auto arr = nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(data_ptr)),
+                                                           shape.size(), shape.data(), cap, nullptr,
+                                                           nb::dtype<uint8_t>(), nb::device::cpu::value);
+
+                return arr;
+            },
+            "Borrow a message (non-blocking) without copy; slot is released when ndarray is GC-ed")
+        .def("try_pop_into",
+             [](shmem::SMQueue &q, nb::ndarray<uint8_t, nb::ndim<1>> dst) -> bool {
+                 if (dst.size() != q.element_size())
+                     throw std::runtime_error("dst wrong size");
+                 return q.try_pop(reinterpret_cast<std::byte*>(dst.data()));
+             },
+             nb::arg("dst"),
+             "Non-blocking pop into a pre-allocated array");
 }

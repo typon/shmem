@@ -13,9 +13,14 @@ if ! command -v uv &> /dev/null; then
     python3.10 -m pip install uv
 fi
 
-# Create a virtual environment with Python 3.10
-echo "Creating virtual environment with Python 3.10..."
-uv venv --python=python3.10
+# Check if virtual environment already exists
+if [ -d ".venv" ]; then
+    echo "Virtual environment .venv already exists. Activating..."
+else
+    # Create a virtual environment with Python 3.10
+    echo "Creating virtual environment with Python 3.10..."
+    uv venv --python=python3.10
+fi
 
 # Activate the virtual environment
 echo "Activating virtual environment..."
@@ -37,9 +42,5 @@ cp cyshmem*.so ../pyshmem/shmem/
 echo "Installing shmem package..."
 cd ../pyshmem
 uv pip install -e .
-
-# Run the example
-echo "Running multiprocessing example..."
-python example.py
 
 echo "Done!" 

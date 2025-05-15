@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pyshmem"
 version = "1.0.0"
 description = "Python bindings for shmem library - a shared memory queue implementation"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.20.0",
+    "pytest>=8.3.5",
 ]
 
 [project.optional-dependencies]
